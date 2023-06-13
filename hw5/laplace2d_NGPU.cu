@@ -76,7 +76,7 @@ __global__ void laplacian(float *phi_old, float *phi_new, float *buffer,
             diff = 0.0;
         } else {
             phi_new[site] = (r + l + f + b) / 4.0;
-            phi_new[site] = 1.5 * phi_new[site] - phi_old[site];
+//            phi_new[site] = 1.5 * phi_new[site] - phi_old[site];
 
             diff = phi_new[site] - phi_old[site];
         }
@@ -89,7 +89,7 @@ __global__ void laplacian(float *phi_old, float *phi_new, float *buffer,
         b = phi_old[site - Nx];
 
         phi_new[site] = (r + l + f + b) / 4.0;
-        phi_new[site] = 1.5 * phi_new[site] - phi_old[site];
+//        phi_new[site] = 1.5 * phi_new[site] - phi_old[site];
 
         diff = phi_new[site] - phi_old[site];
     }
@@ -106,6 +106,118 @@ __global__ void laplacian(float *phi_old, float *phi_new, float *buffer,
     }
     int blockIndex = blockIdx.x + gridDim.x * blockIdx.y;
     if (cacheIndex == 0) buffer[blockIndex] = cache[0];
+    phi_old[site] = phi_new[site];
+
+}
+
+__global__ void laplacian_tex(float *phi_old, float *phi_new, float *buffer, cudaTextureObject_t textCache,
+                              cudaTextureObject_t phi_R, cudaTextureObject_t phi_L,
+                              cudaTextureObject_t phi_F, cudaTextureObject_t phi_B) {
+
+    extern __shared__ float cache[];
+
+    float r, l, f, b;
+    float diff;
+
+    int Nx = blockDim.x * gridDim.x;
+    int Ny = blockDim.y * gridDim.y;
+
+    int i = blockDim.x * blockIdx.x + threadIdx.x;
+    int j = blockDim.y * blockIdx.y + threadIdx.y;
+
+    int cacheIndex = threadIdx.x + threadIdx.y * blockDim.x;
+
+    int site = i + j * Nx;
+
+    if ((i == 0) || (i == Nx - 1) || (j == 0) || (j == Ny - 1)) {
+        bool flag = false;
+        // Check X
+        if (i == 0) {
+            if (phi_L != 0) {
+//                r = phi_old[site + 1];
+//                l = phi_L[Nx - 1 + j * Nx];
+                r = tex1Dfetch<float>(textCache, site + 1);
+                l = tex1Dfetch<float>(phi_L, Nx - 1 + j * Nx);
+
+            } else {
+                flag = true;
+            }
+        } else if (i == Nx - 1) {
+            if (phi_R != 0) {
+//                r = phi_R[0 + j * Nx];
+//                l = phi_old[site - 1];
+                r = tex1Dfetch<float>(phi_R, 0 + j * Nx);
+                l = tex1Dfetch<float>(textCache, site - 1);
+            } else {
+                flag = true;
+            }
+        } else {
+//            r = phi_old[site + 1];
+//            l = phi_old[site - 1];
+            r = tex1Dfetch<float>(textCache, site + 1);
+            l = tex1Dfetch<float>(textCache, site - 1);
+        }
+        // Check Y
+        if (j == 0) {
+            if (phi_B != 0) {
+//                f = phi_old[site + Nx];
+//                b = phi_B[i + (Ny - 1) * Nx];
+                f = tex1Dfetch<float>(textCache, site + Nx);
+                b = tex1Dfetch<float>(phi_B, i + (Ny - 1) * Nx);
+            } else {
+                flag = true;
+            }
+        } else if (j == Ny - 1) {
+            if (phi_F != 0) {
+//                f = phi_F[i];
+//                b = phi_old[site - Nx];
+                f = tex1Dfetch<float>(phi_F, i);
+                b = tex1Dfetch<float>(textCache, site - Nx);
+            } else {
+                flag = true;
+            }
+        } else {
+//            f = phi_old[site + Nx];
+//            b = phi_old[site - Nx];
+            f = tex1Dfetch<float>(textCache, site + Nx);
+            b = tex1Dfetch<float>(textCache, site - Nx);
+        }
+
+        if (flag) {
+            diff = 0.0;
+        } else {
+            phi_new[site] = (r + l + f + b) / 4.0;
+//            phi_new[site] = 1.5 * phi_new[site] - phi_old[site];
+
+            diff = phi_new[site] - phi_old[site];
+        }
+
+    } else {
+
+        r = tex1Dfetch<float>(textCache, site + 1);
+        l = tex1Dfetch<float>(textCache, site - 1);
+        f = tex1Dfetch<float>(textCache, site + Nx);
+        b = tex1Dfetch<float>(textCache, site - Nx);
+
+        phi_new[site] = (r + l + f + b) / 4.0;
+//        phi_new[site] = 1.5 * phi_new[site] - phi_old[site];
+
+        diff = phi_new[site] - phi_old[site];
+    }
+
+    cache[cacheIndex] = diff * diff;
+    __syncthreads();
+
+    int ib = blockDim.x * blockDim.y / 2;
+    while (ib != 0) {
+        if (cacheIndex < ib)
+            cache[cacheIndex] += cache[cacheIndex + ib];
+        __syncthreads();
+        ib /= 2;
+    }
+    int blockIndex = blockIdx.x + gridDim.x * blockIdx.y;
+    if (cacheIndex == 0) buffer[blockIndex] = cache[0];
+    phi_old[site] = phi_new[site];
 
 }
 
@@ -146,6 +258,10 @@ int main() {
     scanf("%d", &threadsPerBlock);
     blocksPerGrid = GRIDS / threadsPerBlock;
 
+    int useTexture;
+    printf("Use texture cache ? (0 / 1)");
+    scanf("%d", &useTexture);
+
     if (blocksPerGrid * threadsPerBlock != GRIDS || blocksPerGrid % nGPUx != 0 || blocksPerGrid % nGPUy != 0) {
         printf("The block size is incorrect\n");
     }
@@ -164,7 +280,9 @@ int main() {
     for (int i = 0; i < nGPU; i++) {
         phi_host[i] = (float *) malloc(size / nGPU);
         buffer_host[i] = (float *) malloc(buffer_size / nGPU);
-        memset(phi_host[i], 0, size / nGPU);
+        for (int j = 0; j < N; j++) {
+            phi_host[i][j] = 273.0;
+        }
     }
 
     // -------------------------------------------------------------------------------------
@@ -205,13 +323,6 @@ int main() {
     // -------------------------------------------------------------------------------------
 
     cudaEvent_t start, stop;
-    float InTime, OutTime, PTime, CPUTime;
-    float **phi, **phio, **buffer;
-
-    phi = (float **) malloc(nGPU * sizeof(float *));
-    phio = (float **) malloc(nGPU * sizeof(float *));
-    buffer = (float **) malloc(nGPU * sizeof(float *));
-    int buffer_dim = blocksPerGrid * blocksPerGrid / nGPUx / nGPUy;
 
     printf("Grid Dimension: (%d, %d, %d)\n", griddim.x, griddim.y, griddim.z);
     printf("Block Dimension: (%d, %d, %d)\n", blockdim.x, blockdim.y, blockdim.z);
@@ -220,8 +331,20 @@ int main() {
     cudaEventCreate(&stop);
     cudaEventRecord(start, 0);
 
+    float InTime, OutTime, PTime, CPUTime;
+    float **phi, **phio, **buffer;
+
+    phi = (float **) malloc(nGPU * sizeof(float *));
+    phio = (float **) malloc(nGPU * sizeof(float *));
+    buffer = (float **) malloc(nGPU * sizeof(float *));
+    int buffer_dim = blocksPerGrid * blocksPerGrid / nGPUx / nGPUy;
+
+    // Use texture cache only for phi_old
+    cudaTextureObject_t *tex_cache;
+    tex_cache = (cudaTextureObject_t *) malloc(nGPU * sizeof(cudaTextureObject_t));
+
 #pragma omp parallel num_threads(nGPU) default(none) shared(phi, phio, buffer, phi_host, buffer_host) \
-shared(nGPU, nGPUx, nGPUy, size, buffer_size, buffer_dim, griddim, blockdim, TOL, ITER_MAX)
+shared(nGPU, nGPUx, nGPUy, size, buffer_size, buffer_dim, griddim, blockdim, TOL, ITER_MAX, useTexture, tex_cache)
     {
         int id = omp_get_thread_num();
         cudaError_t isate = cudaSetDevice(id);
@@ -233,6 +356,21 @@ shared(nGPU, nGPUx, nGPUy, size, buffer_size, buffer_dim, griddim, blockdim, TOL
 
         cudaMemcpy(phi[id], phi_host[id], size / nGPU, cudaMemcpyHostToDevice);
         cudaMemcpy(phio[id], phi_host[id], size / nGPU, cudaMemcpyHostToDevice);
+
+        if (useTexture != 0) {
+
+            struct cudaResourceDesc resDesc;
+            struct cudaTextureDesc texDesc;
+
+            memset(&texDesc, 0, sizeof(texDesc));
+            memset(&resDesc, 0, sizeof(resDesc));
+            resDesc.resType = cudaResourceTypeLinear;
+            resDesc.res.linear.devPtr = phio[id];
+            resDesc.res.linear.desc = cudaCreateChannelDesc<float>();
+            resDesc.res.linear.sizeInBytes = size;
+            cudaCreateTextureObject(&tex_cache[id], &resDesc, &texDesc, NULL);
+
+        }
 
         int gx = id % nGPUx;
         int gy = id / nGPUx;
@@ -268,7 +406,8 @@ shared(nGPU, nGPUx, nGPUy, size, buffer_size, buffer_dim, griddim, blockdim, TOL
     while ((error > TOL) && (iter < ITER_MAX)) {
 
 #pragma omp parallel num_threads(nGPU) default(none) \
-shared(phi, phio, buffer, buffer_host, nGPUx, nGPUy, nGPU, griddim, blockdim, buffer_size, shm_size, size)
+shared(phi, phio, buffer, buffer_host, nGPUx, nGPUy, nGPU, griddim, blockdim, buffer_size, shm_size, \
+        size, useTexture, tex_cache)
         {
             int id = omp_get_thread_num();
             cudaSetDevice(id);
@@ -276,15 +415,27 @@ shared(phi, phio, buffer, buffer_host, nGPUx, nGPUy, nGPU, griddim, blockdim, bu
             int gx = id % nGPUx;
             int gy = id / nGPUx;
 
-            float *phi_r = gx == nGPUx - 1 ? NULL : phio[id + 1];
-            float *phi_l = gx == 0 ? NULL : phio[id - 1];
-            float *phi_t = gy == nGPUy - 1 ? NULL : phio[id + nGPUx];
-            float *phi_b = gy == 0 ? NULL : phio[id - nGPUx];
+            if (useTexture == 0) {
+                float *phi_r = gx == nGPUx - 1 ? NULL : phio[id + 1];
+                float *phi_l = gx == 0 ? NULL : phio[id - 1];
+                float *phi_t = gy == nGPUy - 1 ? NULL : phio[id + nGPUx];
+                float *phi_b = gy == 0 ? NULL : phio[id - nGPUx];
 
-            laplacian<<<griddim, blockdim, shm_size>>>(phi[id], phio[id], buffer[id],
-                                                       phi_r, phi_l, phi_t, phi_b);
+                laplacian<<<griddim, blockdim, shm_size>>>(phi[id], phio[id], buffer[id],
+                                                           phi_r, phi_l, phi_t, phi_b);
+            } else {
+                cudaTextureObject_t phi_r = gx == nGPUx - 1 ? 0 : tex_cache[id + 1];
+                cudaTextureObject_t phi_l = gx == 0 ? 0 : tex_cache[id - 1];
+                cudaTextureObject_t phi_f = gy == nGPUy - 1 ? 0 : tex_cache[id + nGPUx];
+                cudaTextureObject_t phi_b = gy == 0 ? 0 : tex_cache[id - nGPUx];
+
+                laplacian_tex<<<griddim, blockdim, shm_size>>>(phi[id], phio[id],
+                                                               buffer[id], tex_cache[id],
+                                                               phi_r, phi_l, phi_f, phi_b);
+            }
+
             cudaMemcpy(buffer_host[id], buffer[id], buffer_size / nGPU, cudaMemcpyDeviceToHost);
-            cudaMemcpy(phio[id], phi[id], size / nGPU, cudaMemcpyDeviceToDevice);
+//            cudaMemcpy(phio[id], phi[id], size / nGPU, cudaMemcpyDeviceToDevice);
             cudaDeviceSynchronize();
 
         }
