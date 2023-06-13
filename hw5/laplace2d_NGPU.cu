@@ -204,7 +204,7 @@ int main() {
     plot(phi_global, 0);
     // -------------------------------------------------------------------------------------
 
-
+    cudaEvent_t start, stop;
     float InTime, OutTime, PTime, CPUTime;
     float **phi, **phio, **buffer;
 
@@ -215,6 +215,10 @@ int main() {
 
     printf("Grid Dimension: (%d, %d, %d)\n", griddim.x, griddim.y, griddim.z);
     printf("Block Dimension: (%d, %d, %d)\n", blockdim.x, blockdim.y, blockdim.z);
+
+    cudaEventCreate(&start);
+    cudaEventCreate(&stop);
+    cudaEventRecord(start, 0);
 
 #pragma omp parallel num_threads(nGPU) default(none) shared(phi, phio, buffer, phi_host, buffer_host) \
 shared(nGPU, nGPUx, nGPUy, size, buffer_size, buffer_dim, griddim, blockdim, TOL, ITER_MAX)
@@ -251,6 +255,11 @@ shared(nGPU, nGPUx, nGPUy, size, buffer_size, buffer_dim, griddim, blockdim, TOL
         }
     }
 
+    cudaEventRecord(stop, 0);
+    cudaEventSynchronize(stop);
+    cudaEventElapsedTime(&InTime, start, stop);
+    printf("Data input time for GPU: %f (ms) \n", InTime);
+    cudaEventRecord(start, 0);
 
     double error = 10 * TOL;
     int iter = 0;
@@ -294,11 +303,23 @@ shared(phi, phio, buffer, buffer_host, nGPUx, nGPUy, nGPU, griddim, blockdim, bu
 
     }
 
+    cudaEventRecord(stop, 0);
+    cudaEventSynchronize(stop);
+    cudaEventElapsedTime(&PTime, start, stop);
+    printf("Processing time for GPU: %f (ms) \n", PTime);
+    cudaEventRecord(start, 0);
+
 #pragma omp parallel for num_threads(nGPU) default(none) shared(phi, phi_host, nGPU, size)
     for (int id = 0; id < nGPU; id++) {
         cudaSetDevice(id);
         cudaMemcpy(phi_host[id], phi[id], size / nGPU, cudaMemcpyDeviceToHost);
     }
+
+    cudaEventRecord(stop, 0);
+    cudaEventSynchronize(stop);
+    cudaEventElapsedTime(&OutTime, start, stop);
+    printf("Data output time for GPU: %f (ms) \n", OutTime);
+    cudaEventRecord(start, 0);
 
     merge(phi_host, phi_global, nGPUx, nGPUy);
     plot(phi_global, 1);
