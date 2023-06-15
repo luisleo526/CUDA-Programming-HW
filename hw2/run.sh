@@ -1,9 +1,12 @@
 if [ ! -f ./vecRedu ]
 then
-	make
+        make
 fi
 
-for size in 8 16 32 64 128 256 512
+for t in 8 16 32 64 128 256 512
 do
-	echo 0 8192007 $size | ./vecRedu
+        for b in 32 64 128 256 512 1024
+        do
+                echo 0 81920007 $t $b | ./vecRedu
+        done
 done
