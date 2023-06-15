@@ -109,6 +109,12 @@ int main(void) {
     RandomInit(h_A, N);
     RandomInit(h_B, N);
 
+    printf("----------------------------\n");
+    printf("  Blocks per Grid: %d \n", blocksPerGrid);
+    printf("Threads per Block: %d \n", threadsPerBlock);
+    printf("----------------------------\n");
+
+
 #pragma omp parallel default(none) shared(h_A, h_B, N, size, sb, threadsPerBlock, blocksPerGrid, h_buffer, nGPU) num_threads(nGPU)
     {
         int id = omp_get_thread_num();
