@@ -80,7 +80,7 @@ int main() {
     double *d_I, *d_Im, *d_w, *d_wold, *buffer, *buffer2;
 
     int threadsPerBlock;
-    printf("Input threads per block: ");
+    printf("Input threads per block: \n");
     scanf("%d", &threadsPerBlock);
     int blocksPerGrid = (num + threadsPerBlock - 1) / threadsPerBlock;
 
