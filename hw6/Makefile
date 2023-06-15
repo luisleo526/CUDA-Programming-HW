@@ -13,7 +13,7 @@ LIB     :=
 all: hist
 
 hist: hist.cu
-	$(NVCC) -o hist $(NVFLAGS) hist.cu -I$(LIB)
+	$(NVCC) -o hist $(NVFLAGS) hist.cu $(LIB)
 clean:
 	rm -f $(BIN)
 
