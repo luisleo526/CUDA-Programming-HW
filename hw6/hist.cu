@@ -52,11 +52,11 @@ int main() {
     double max_value;
 
     int memtype;
-    printf("Global / Shared memory (0/1): ");
+    printf("Global / Shared memory (0/1): \n");
     scanf("%d", &memtype);
 
     int threadsPerBlock;
-    printf("Enter the number of threads per block: ");
+    printf("Enter the number of threads per block: \n");
     scanf("%d", &threadsPerBlock);
 
     int blocksPerGrid = ((int) NUM + threadsPerBlock - 1) / threadsPerBlock;
@@ -67,7 +67,7 @@ int main() {
 
     int num_bins;
     if (memtype == 0) {
-        printf("Input the number of bins: ");
+        printf("Input the number of bins: \n");
         scanf("%d", &num_bins);
     } else {
         num_bins = threadsPerBlock;
