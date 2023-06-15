@@ -187,24 +187,31 @@ int main() {
     f3 = fopen("importance_sampling_cpu.txt", "w");
     f4 = fopen("importance_sampling_gpu.txt", "w");
 
+    printf("----------------------------\n");
+    printf(" threadsPerBlock: %d", threadsPerBlock);
+    printf(" CPU processing time: %f, %f\n", cpu_sim, cpu_imp);
+    printf(" GPU processing time: %f, %f\n", gpu_sim, gpu_imp);
+    printf("----------------------------\n");
+
+
     double mean, std;
     for (int i = 6; i < power_max + 1; i++) {
         num = ipow(2, i);
         printf("N = %d \n", num);
         mean_std(I, num, &mean, &std);
-        printf("    Simple Sampling(CPU): %f (+/-) %.6e, Processing Time: %f\n", mean, std, cpu_sim);
+        // printf("    Simple Sampling(CPU): %f (+/-) %.6e, Processing Time: %f\n", mean, std, cpu_sim);
         fprintf(f1, "%d, %f, %f\n", num, mean, std);
 
         mean_std(buffer, num, &mean, &std);
-        printf("    Simple Sampling(GPU): %f (+/-) %.6e, Processing Time: %f\n", mean, std, gpu_sim);
+        // printf("    Simple Sampling(GPU): %f (+/-) %.6e, Processing Time: %f\n", mean, std, gpu_sim);
         fprintf(f2, "%d, %f, %f\n", num, mean, std);
 
         mean_std(Im, num, &mean, &std);
-        printf("Importance Sampling(CPU): %f (+/-) %.6e, Processing Time: %f\n", mean, std, cpu_imp);
+        // printf("Importance Sampling(CPU): %f (+/-) %.6e, Processing Time: %f\n", mean, std, cpu_imp);
         fprintf(f3, "%d, %f, %f\n", num, mean, std);
 
         mean_std(buffer2, num, &mean, &std);
-        printf("Importance Sampling(GPU): %f (+/-) %.6e, Processing Time: %f\n", mean, std, gpu_imp);
+        // printf("Importance Sampling(GPU): %f (+/-) %.6e, Processing Time: %f\n", mean, std, gpu_imp);
         fprintf(f4, "%d, %f, %f\n", num, mean, std);
         printf("-----------------------------\n");
     }
