@@ -120,13 +120,13 @@ int main(void) {
         exit(1);
     }
 
-    printf("Enter the domain size (LxLxL) of the 3D lattice domain: ");
+    printf("Enter the domain size (LxLxL) of the 3D lattice domain: \n");
     scanf("%d", &L);
 
-    printf("Enter the number of grids (N x N x N) of the 3D lattice domain: ");
+    printf("Enter the number of grids (N x N x N) of the 3D lattice domain: \n");
     scanf("%d", &NN);
 
-    printf("Enter the number of threads (t, t, t) per block: ");
+    printf("Enter the number of threads (t, t, t) per block: \n");
     scanf("%d", &T);
 
     // Structured Grids
@@ -235,10 +235,10 @@ int main(void) {
         }
         error = sqrt(error);
 
-        if (iter % 200 == 0) {
-            printf("Iter: %d, error: %.4e\n", iter, error);
-            fflush(stdout);
-        }
+        // if (iter % 200 == 0) {
+        //     printf("Iter: %d, error: %.4e\n", iter, error);
+        //     fflush(stdout);
+        // }
 
     }
 

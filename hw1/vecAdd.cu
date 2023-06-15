@@ -46,7 +46,7 @@ int main( )
     // Error code to check return values for CUDA calls
     cudaError_t err = cudaSuccess;
 
-    //printf("Enter the GPU_ID: ");
+    printf("Enter the GPU_ID: \n");
     scanf("%d",&gid);
     //printf("%d\n", gid);
     err = cudaSetDevice(gid);
@@ -62,7 +62,7 @@ int main( )
     int mem = 1024*1024*1024;     // Giga    
     int N;
 
-    //printf("Enter the size of the vectors: ");
+    printf("Enter the size of the vectors: \n");
     scanf("%d",&N);        
     //printf("%d\n",N);        
     if( 2*N > mem ) {     // each real number (float) takes 4 bytes
@@ -86,7 +86,7 @@ int main( )
 
     int threadsPerBlock;
 loop:
-    //printf("Enter the number of threads per block: ");
+    printf("Enter the number of threads per block: \n");
     scanf("%d",&threadsPerBlock);
     //printf("%d\n",threadsPerBlock);
     if( threadsPerBlock > 1024 ) {

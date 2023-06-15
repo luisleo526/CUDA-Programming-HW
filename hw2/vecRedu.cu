@@ -66,7 +66,7 @@ int main(void)
     // Error code to check return values for CUDA calls
     cudaError_t err = cudaSuccess;
 
-    //printf("Enter the GPU ID: ");
+    printf("Enter the GPU ID: \n");
     scanf("%d",&gid);
     //printf("%d\n", gid);
     err = cudaSetDevice(gid);
@@ -81,14 +81,14 @@ int main(void)
     printf("\n\nVector Reduction\n");
     int N;
 
-    //printf("Enter the size of the vectors: ");
+    printf("Enter the size of the vectors: \n");
     scanf("%d",&N);        
     //printf("%d\n",N);        
 
     // Set the sizes of threads and blocks
 
     int threadsPerBlock;
-    //printf("Enter the number (2^m) of threads per block: ");
+    printf("Enter the number (2^m) of threads per block: \n");
     scanf("%d",&threadsPerBlock);
     //printf("%d\n",threadsPerBlock);
     if( threadsPerBlock > 1024 ) {
@@ -100,7 +100,7 @@ int main(void)
 //    printf("The number of blocks per grid:%d\n",blocksPerGrid);
  
     int blocksPerGrid;
-    //printf("Enter the number of blocks per grid: ");
+    printf("Enter the number of blocks per grid: \n");
     scanf("%d",&blocksPerGrid);
     //printf("%d\n",blocksPerGrid);
 

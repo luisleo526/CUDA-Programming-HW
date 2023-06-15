@@ -448,9 +448,9 @@ shared(phi, phio, buffer, buffer_host, nGPUx, nGPUy, nGPU, griddim, blockdim, bu
         }
         error = sqrt(error);
 
-        if (iter++ % 1000 == 0) {
-            printf("Iteration: %d, Error: %20.15e \n", iter, error);
-        }
+        // if (iter++ % 50000 == 0) {
+        //     printf("Iteration: %d, Error: %20.15e \n", iter, error);
+        // }
 
     }
 

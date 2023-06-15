@@ -1,154 +1,242 @@
 #include <stdio.h>
 #include <math.h>
+#include <curand_kernel.h>
 #include <cuda_runtime.h>
 #include <float.h>
 
-long NUM = 81920000;
 
-void init_data(double *x, double *max_value);
+int ipow(int x, int n);
 
+void mean_std(const double *x, int n, double *mean, double *std);
 
-__global__ void hist_gmem(double *data, const long N, unsigned int *hist, const double binsize) {
+__global__ void importance_sampling(double *I, double C, int dim, int num) {
 
-    long i = threadIdx.x + blockIdx.x * blockDim.x;
-    long stride = blockDim.x * gridDim.x;
+    int i = blockIdx.x * blockDim.x + threadIdx.x;
 
-    while (i < N) {
-        int index = (int) (data[i] / binsize);
-        atomicAdd(&hist[index], 1);
-        i += stride;
+    curandState state;
+    curand_init((unsigned long long) clock() + i, 0, 0, &state);
+
+    double w, w_old, y, Iold;
+    int iter = 0;
+
+    // Only one block
+    while (i < num) {
+        I[i] = 1.0;
+        w = 1.0;
+        for (int j = 0; j < dim; j++) {
+            double x = curand_uniform_double(&state);
+            y = -log(1.0 - x / C);
+            I[i] += y * y;
+            w = w * C * exp(-y);
+        }
+        I[i] = 1.0 / I[i] / w;
+
+        if (iter > 0) {
+            if (w > w_old) {
+                Iold = I[i];
+                w_old = w;
+            } else {
+                if (curand_uniform_double(&state) < w / w_old) {
+                    Iold = I[i];
+                    w_old = w;
+                }
+            }
+        } else {
+            Iold = I[i];
+            w_old = w;
+        }
+        I[i] = Iold;
+        iter++;
+        i += blockDim.x;
     }
-
-    __syncthreads();
 
 }
 
-__global__ void hist_shmem(double *data, const long N, unsigned int *hist, const double binsize) {
+__global__ void simple_sampling(double *I, int dim, int num) {
 
-    extern __shared__  unsigned int temp[];
-    temp[threadIdx.x] = 0;
-    __syncthreads();
+    int i = blockIdx.x * blockDim.x + threadIdx.x;
 
-    long i = threadIdx.x + blockIdx.x * blockDim.x;
-    long stride = blockDim.x * gridDim.x;
+    curandState state;
+    curand_init((unsigned long long) clock() + i, 0, 0, &state);
 
-    while (i < N) {
-        int index = (int) (data[i] / binsize);
-//        atomicAdd(&hist[index], 1);
-        atomicAdd(&temp[index], 1);
-        i += stride;
+    if (i < num) {
+        I[i] = 1.0;
+        for (int j = 0; j < dim; j++) {
+            double x = curand_uniform_double(&state);
+            I[i] += x * x;
+        }
+        I[i] = 1.0 / I[i];
     }
 
-    __syncthreads();
-    atomicAdd(&(hist[threadIdx.x]), temp[threadIdx.x]);
-
 }
-
 
 int main() {
 
-    double *dat, *dat_d;
-    unsigned int *hist, *hist_d, *hist_ref;
-    double max_value;
+    int power_max = 16;
+    int dim = 10;
+    int num = ipow(2, power_max);
+    double C = 1.0 / (1.0 - exp(-1.0));
 
-    int memtype;
-    printf("Global / Shared memory (0/1): ");
-    scanf("%d", &memtype);
+    double *d_I, *d_Im, *d_w, *d_wold, *buffer, *buffer2;
 
     int threadsPerBlock;
-    printf("Enter the number of threads per block: ");
+    printf("Input threads per block: ");
     scanf("%d", &threadsPerBlock);
+    int blocksPerGrid = (num + threadsPerBlock - 1) / threadsPerBlock;
 
-    int blocksPerGrid = ((int) NUM + threadsPerBlock - 1) / threadsPerBlock;
+    buffer = (double *) malloc(num * sizeof(double));
+    buffer2 = (double *) malloc(num * sizeof(double));
 
-//    int blocksPerGrid;
-//    printf("Enter the number of blocks per grid: ");
-//    scanf("%d", &blocksPerGrid);
+    cudaMalloc((void **) &d_I, num * sizeof(double));
+    cudaMalloc((void **) &d_Im, num * sizeof(double));
+    cudaMalloc((void **) &d_w, num * sizeof(double));
+    cudaMalloc((void **) &d_wold, num * sizeof(double));
 
-    int num_bins;
-    if (memtype == 0) {
-        printf("Input the number of bins: ");
-        scanf("%d", &num_bins);
-    } else {
-        num_bins = threadsPerBlock;
-    }
+    // Simple Sampling
+    double *I = (double *) malloc(num * sizeof(double));
+    // Importance Sampling
+    double *Im = (double *) malloc(num * sizeof(double));
 
-    if (blocksPerGrid > 2147483647) {
-        printf("The number of blocks must be less than 2147483647 ! \n");
-        exit(0);
-    }
-
-    dat = (double *) malloc(NUM * sizeof(double));
-    hist = (unsigned int *) malloc(num_bins * sizeof(unsigned int));
-    hist_ref = (unsigned int *) malloc(num_bins * sizeof(unsigned int));
-
-    init_data(dat, &max_value);
-    double bin_size = max_value / (double) num_bins;
+    double *x = (double *) malloc(dim * sizeof(double));
+    double *xold = (double *) malloc(dim * sizeof(double));
+    double wx, wx_old;
 
     cudaEvent_t start, stop;
     cudaEventCreate(&start);
     cudaEventCreate(&stop);
-    cudaEventRecord(start, 0);
 
-    for (long i = 0; i < NUM; i++) {
-        long index = (long) (dat[i] / bin_size);
-        hist[index] += 1;
-    }
-
-    printf("---------------------------------------\n");
-    printf("Threads per block: %d\n", threadsPerBlock);
-    printf("Blocks per grid: %d\n", blocksPerGrid);
-    if (memtype == 0) {
-        printf("Memory type: Global memory\n");
-    } else {
-        printf("Memory type: Shared memory\n");
-    }
-    printf("---------------------------------------\n");
-
-    cudaEventRecord(stop, 0);
-    cudaEventSynchronize(stop);
-    float elapsedTime;
-    cudaEventElapsedTime(&elapsedTime, start, stop);
-    printf("Processing time of CPU: %f (ms)\n", elapsedTime);
-
-    cudaMalloc((void **) &dat_d, NUM * sizeof(double));
-    cudaMalloc((void **) &hist_d, num_bins * sizeof(unsigned int));
-    cudaMemcpy(dat_d, dat, NUM * sizeof(double), cudaMemcpyHostToDevice);
+    float cpu_sim, cpu_imp, gpu_sim, gpu_imp;
 
     cudaEventRecord(start, 0);
 
-    if (memtype == 0) {
-        hist_gmem<<<blocksPerGrid, threadsPerBlock >>>(dat_d, NUM, hist_d, bin_size);
-    } else {
-        int shm_size = threadsPerBlock * sizeof(unsigned int);
-        hist_shmem<<<blocksPerGrid, threadsPerBlock, shm_size>>>(dat_d, NUM, hist_d, bin_size);
+    double w;
+    for (int i = 0; i < num; i++) {
+        for (int j = 0; j < dim; j++) {
+            x[j] = rand() / (double) RAND_MAX;
+        }
+        I[i] = 1.0;
+        for (int j = 0; j < dim; j++) {
+            // Simple Sampling
+            I[i] += x[j] * x[j];
+        }
+        I[i] = 1.0 / I[i];
     }
 
     cudaEventRecord(stop, 0);
     cudaEventSynchronize(stop);
-    cudaEventElapsedTime(&elapsedTime, start, stop);
-    printf("Processing time of GPU: %f (ms)\n", elapsedTime);
+    cudaEventElapsedTime(&cpu_sim, start, stop);
 
+    cudaEventRecord(start, 0);
 
-    cudaMemcpy(hist_ref, hist_d, num_bins * sizeof(unsigned int), cudaMemcpyDeviceToHost);
+    // Importance Sampling
+    for (int i = 0; i < num; i++) {
 
-    FILE *out1;
-    out1 = fopen("histogram.plt", "w");
-    fprintf(out1, "Variables = \"x\" \"cpu\" \"gpu\" \"theory\"\n");
-    for (int i = 0; i < num_bins; i++) {
-        double x = (i + 0.5) * bin_size;
-        double ref = exp(-x);
-        fprintf(out1, "%f %f %f %f\n", x, (double) hist[i] / (double) NUM, (double) hist_ref[i] / (double) NUM, ref);
+        wx = 1.0;
+        for (int j = 0; j < dim; j++) {
+            x[j] = rand() / (double) RAND_MAX;
+            double y = -log(1.0 - x[j] / C);
+            wx *= C * exp(-y);
+        }
+
+        if (i > 0) {
+            if (wx > wx_old) {
+                for (int j = 0; j < dim; j++)xold[j] = x[j];
+            } else {
+                if (rand() / (double) RAND_MAX < wx / wx_old) {
+                    for (int j = 0; j < dim; j++)xold[j] = x[j];
+                }
+            }
+        } else {
+            for (int j = 0; j < dim; j++)xold[j] = x[j];
+            wx_old = wx;
+        }
+
+        Im[i] = 1.0;
+        w = 1.0;
+        for (int j = 0; j < dim; j++) {
+            double y = -log(1.0 - xold[j] / C);
+            Im[i] += y * y;
+            w *= C * exp(-y);
+        }
+        Im[i] = 1.0 / Im[i] / w;
+
     }
-    fclose(out1);
+
+    cudaEventRecord(stop, 0);
+    cudaEventSynchronize(stop);
+    cudaEventElapsedTime(&cpu_imp, start, stop);
+
+    cudaEventRecord(start, 0);
+    simple_sampling<<<blocksPerGrid, threadsPerBlock >>>(d_I, dim, num);;
+    cudaMemcpy(buffer, d_I, num * sizeof(double), cudaMemcpyDeviceToHost);
+    cudaEventRecord(stop, 0);
+    cudaEventSynchronize(stop);
+    cudaEventElapsedTime(&gpu_sim, start, stop);
+
+    cudaEventRecord(start, 0);
+    importance_sampling<<<1, threadsPerBlock >>>(d_I, C, dim, num);
+    cudaMemcpy(buffer2, d_I, num * sizeof(double), cudaMemcpyDeviceToHost);
+    cudaEventRecord(stop, 0);
+    cudaEventSynchronize(stop);
+    cudaEventElapsedTime(&gpu_imp, start, stop);
+
+    FILE *f1, *f2, *f3, *f4;
+
+    f1 = fopen("simple_sampling_cpu.txt", "w");
+    f2 = fopen("simple_sampling_gpu.txt", "w");
+    f3 = fopen("importance_sampling_cpu.txt", "w");
+    f4 = fopen("importance_sampling_gpu.txt", "w");
+
+    double mean, std;
+    for (int i = 6; i < power_max + 1; i++) {
+        num = ipow(2, i);
+        printf("N = %d \n", num);
+        mean_std(I, num, &mean, &std);
+        printf("    Simple Sampling(CPU): %f (+/-) %.6e, Processing Time: %f\n", mean, std, cpu_sim);
+        fprintf(f1, "%d, %f, %f\n", num, mean, std);
+
+        mean_std(buffer, num, &mean, &std);
+        printf("    Simple Sampling(GPU): %f (+/-) %.6e, Processing Time: %f\n", mean, std, gpu_sim);
+        fprintf(f2, "%d, %f, %f\n", num, mean, std);
+
+        mean_std(Im, num, &mean, &std);
+        printf("Importance Sampling(CPU): %f (+/-) %.6e, Processing Time: %f\n", mean, std, cpu_imp);
+        fprintf(f3, "%d, %f, %f\n", num, mean, std);
+
+        mean_std(buffer2, num, &mean, &std);
+        printf("Importance Sampling(GPU): %f (+/-) %.6e, Processing Time: %f\n", mean, std, gpu_imp);
+        fprintf(f4, "%d, %f, %f\n", num, mean, std);
+        printf("-----------------------------\n");
+    }
+    fclose(f1);
+    fclose(f2);
+    fclose(f3);
+    fclose(f4);
+
+
 }
 
-void init_data(double *x, double *max_value) {
-
-    for (long i = 0; i < NUM; i++) {
-        double entry = rand() / (double) RAND_MAX;
-        x[i] = -log(1.0 - entry);
-        *max_value = (x[i] < *max_value) ? *max_value : x[i];
+int ipow(int x, int n) {
+    int result = 1;
+    int iter = 0;
+    while (iter < n) {
+        result *= x;
+        iter++;
     }
+    return result;
+}
+
+void mean_std(const double *x, int n, double *mean, double *std) {
+
+    double l1, l2;
+    l1 = 0.0;
+    l2 = 0.0;
+    for (int i = 0; i < n; i++) {
+        l1 = l1 + x[i];
+        l2 = l2 + x[i] * x[i];
+    }
+
+    *mean = l1 / (double) n;
+    *std = sqrt((l2 / (double) n - (*mean) * (*mean)) / (double) n);
 
 }
